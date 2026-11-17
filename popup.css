@@ -1,0 +1,97 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: #e5e7eb;
+  background: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  margin: 0;
+}
+
+.settings {
+  padding: 18px;
+}
+
+header {
+  margin-bottom: 18px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+header p,
+.note {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+header p {
+  margin: 6px 0 0;
+}
+
+form {
+  display: grid;
+  gap: 8px;
+}
+
+label {
+  margin-top: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 9px 10px;
+  color: #e5e7eb;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 7px;
+  font: inherit;
+}
+
+button {
+  margin-top: 8px;
+  padding: 9px 12px;
+  color: #082f49;
+  background: #38bdf8;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+#status {
+  min-height: 16px;
+  margin: 0;
+  font-size: 12px;
+}
+
+#status.error {
+  color: #fca5a5;
+}
+
+#status.success {
+  color: #86efac;
+}
+
+.note {
+  margin: 14px 0 0;
+  line-height: 1.5;
+}

@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Dev Console AI",
+  "version": "1.0.0",
+  "description": "AI-powered DevTools panel for inspecting console, DOM, and network data.",
+  "action": {
+    "default_title": "Dev Console AI settings",
+    "default_popup": "popup.html"
+  },
+  "devtools_page": "devtools.html",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"]
+}
