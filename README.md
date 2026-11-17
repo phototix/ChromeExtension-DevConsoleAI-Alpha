@@ -7,12 +7,20 @@ Features:
 - Toolbar popup for configuring the DeepSeek API key and model
 - Choose a light, dark, or system-matched DevTools panel theme from the toolbar popup
 - Captures page console, network, and metadata; interactively select and highlight a DOM element to attach its markup
-- Chat UI with automatic capture when selecting a source; DOM context uses the selected element snapshot, while console, network, and page metadata refresh on send. Inspect attached data in a compact modal.
+- Chat UI with automatic capture when selecting a source; console data updates live while selected, and network data refreshes as requests finish. DOM context uses the selected element snapshot, while context is also refreshed on send. Inspect attached data in a compact modal.
 - AI requests include the active conversation history, including previously attached context.
 - Markdown rendering with HTML tables and per-table CSV or Excel (.xlsx) export
 - Copy-to-clipboard support for chat responses
 - Conversation history saved locally
 - DeepSeek API integration
+
+## Screenshots
+
+### Toolbar popup
+![Dev Console AI toolbar popup settings](./screenshots/popup.png)
+
+### DevTools chat panel
+![Dev Console AI DevTools chat panel](./screenshots/devtools-chat.png)
 
 ## Project structure
 - `manifest.json` — extension manifest
@@ -33,5 +41,6 @@ The extension registers the panel from `devtools.html` and renders its UI from `
 
 ## Notes
 - Click the extension icon in Chrome's toolbar to set your DeepSeek API key, model, and DevTools panel theme, then click **Save settings**. Settings are shared with the DevTools panel.
+- Console capture starts when the DevTools panel opens, so it includes new messages but not earlier console history. Chrome may omit some network requests made before DevTools opened; reload the page to capture a complete network log.
 - The extension stores settings and chat history in `chrome.storage.local`.
 - The app uses the DeepSeek Chat Completions API at `https://api.deepseek.com/v1/chat/completions`.

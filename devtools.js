@@ -13,16 +13,82 @@ const state = {
   contextCaptureId: 0,
   domPicker: null,
   themePreference: 'dark',
-  themeMediaQuery: null
+  themeMediaQuery: null,
+  consoleRefreshTimer: null,
+  networkRefreshTimer: null,
+  liveRefreshId: 0
 };
 
+const consoleCaptureExpression = `(() => {
+  if (!window.__devConsoleAiInjected) {
+    const logs = [];
+    const maxLogs = 200;
+    const stringify = (value) => {
+      try {
+        return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      } catch (error) {
+        return String(value);
+      }
+    };
+    const capture = (level, args) => {
+      logs.push({
+        level,
+        message: args.map((arg) => stringify(arg)).join(' '),
+        stamp: new Date().toISOString()
+      });
+      if (logs.length > maxLogs) {
+        logs.splice(0, logs.length - maxLogs);
+      }
+    };
+    ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+      const original = console[level];
+      console[level] = (...args) => {
+        capture(level, args);
+        return original.apply(console, args);
+      };
+    });
+    window.addEventListener('error', (event) => {
+      capture('error', [event.message, event.filename, event.lineno, event.colno].filter(Boolean));
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      capture('error', ['Unhandled promise rejection:', event.reason]);
+    });
+    window.__devConsoleAiLogs = logs;
+    window.__devConsoleAiInjected = true;
+  }
+  return JSON.stringify(window.__devConsoleAiLogs || []);
+})()`;
+
 window.addEventListener('DOMContentLoaded', init);
-window.addEventListener('beforeunload', () => stopDomPicker(false));
+window.addEventListener('beforeunload', () => {
+  stopDomPicker(false);
+  stopLiveContextRefresh();
+});
 
 function init() {
   bindUi();
   loadHistory();
   loadTheme();
+  installConsoleCapture().catch((error) => {
+    state.consoleCaptureError = error.message;
+    setContextStatus(`Console capture unavailable: ${error.message}`);
+  });
+  chrome.devtools.network.onRequestFinished.addListener(() => {
+    if (state.selectedContextType === 'network') {
+      scheduleNetworkRefresh();
+    }
+  });
+  chrome.devtools.network.onNavigated.addListener(() => {
+    installConsoleCapture().catch((error) => {
+      state.consoleCaptureError = error.message;
+      if (state.selectedContextType === 'console') {
+        setContextStatus(`Console capture unavailable: ${error.message}`);
+      }
+    });
+    if (state.selectedContextType === 'console') {
+      refreshLiveContext('console');
+    }
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && changes[storageKeys.theme]) {
       applyTheme(changes[storageKeys.theme].newValue || 'dark');
@@ -321,6 +387,7 @@ async function captureContext(type = document.getElementById('contextType').valu
     return null;
   }
 
+  stopLiveContextRefresh();
   const captureId = ++state.contextCaptureId;
   try {
     if (type === 'none') {
@@ -358,6 +425,7 @@ async function captureContext(type = document.getElementById('contextType').valu
     document.getElementById('cancelDomPickBtn').hidden = true;
     document.getElementById('sendBtn').disabled = false;
     setContextStatus('Attached');
+    startLiveContextRefresh(type);
     return result;
   } catch (error) {
     if (captureId === state.contextCaptureId && type === contextTypeSelect.value) {
@@ -397,60 +465,13 @@ function collectContext(type, captureId) {
     }
 
     if (type === 'console') {
-      chrome.devtools.inspectedWindow.eval(
-        `(() => {
-          if (!window.__devConsoleAiInjected) {
-            const logs = [];
-            const stringify = (value) => {
-              try {
-                return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-              } catch (error) {
-                return String(value);
-              }
-            };
-            const capture = (level, args) => {
-              logs.push({
-                level,
-                message: args.map((arg) => stringify(arg)).join(' '),
-                stamp: new Date().toISOString()
-              });
-            };
-            ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
-              const original = console[level];
-              console[level] = (...args) => {
-                capture(level, args);
-                return original.apply(console, args);
-              };
-            });
-            window.__devConsoleAiLogs = logs;
-            window.__devConsoleAiInjected = true;
-          }
-          return JSON.stringify(window.__devConsoleAiLogs || []);
-        })()`,
-        (result, exceptionInfo) => {
-          if (exceptionInfo) {
-            reject(new Error(exceptionInfo?.description || 'Console capture failed'));
-            return;
-          }
-          const logs = parseJsonSafe(result);
-          resolve(Array.isArray(logs) && logs.length > 0
-            ? JSON.stringify(logs, null, 2)
-            : 'No console logs captured yet.');
-        }
-      );
+      readConsoleLogs().then(resolve, reject);
       return;
     }
 
     if (type === 'network') {
       chrome.devtools.network.getHAR((har) => {
-        const entries = (har.entries || []).slice(0, 40).map((entry) => ({
-          url: entry.request.url,
-          method: entry.request.method,
-          status: entry.response.status,
-          type: entry._resourceType || entry.request.headers['Content-Type'] || 'unknown',
-          size: entry.response.headersSize + entry.response.bodySize,
-          time: entry.time
-        }));
+        const entries = (har?.entries || []).slice(-40).map(formatNetworkEntry);
         resolve(JSON.stringify(entries, null, 2));
       });
       return;
@@ -471,6 +492,96 @@ function collectContext(type, captureId) {
     }
 
     reject(new Error(`Unsupported context type: ${type}`));
+  });
+}
+
+function installConsoleCapture() {
+  return new Promise((resolve, reject) => {
+    chrome.devtools.inspectedWindow.eval(consoleCaptureExpression, (result, exceptionInfo) => {
+      if (exceptionInfo) {
+        reject(new Error(exceptionInfo.description || 'Console capture failed'));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function readConsoleLogs() {
+  return installConsoleCapture().then((result) => {
+    const logs = parseJsonSafe(result);
+    return Array.isArray(logs) && logs.length > 0
+      ? JSON.stringify(logs, null, 2)
+      : 'No console logs captured yet.';
+  });
+}
+
+function formatNetworkEntry(entry) {
+  const request = entry.request || {};
+  const response = entry.response || {};
+  return {
+    url: request.url || '',
+    method: request.method || 'unknown',
+    status: response.status ?? 'unknown',
+    type: entry._resourceType || response.content?.mimeType || 'unknown',
+    size: Math.max(0, response.headersSize || 0) + Math.max(0, response.bodySize || 0),
+    time: entry.time
+  };
+}
+
+function startLiveContextRefresh(type) {
+  if (type === 'console') {
+    state.consoleRefreshTimer = window.setInterval(() => refreshLiveContext('console'), 1000);
+  }
+  if (type === 'console' || type === 'network') {
+    setContextStatus('Live updates on');
+  }
+}
+
+function stopLiveContextRefresh() {
+  if (state.consoleRefreshTimer !== null) {
+    window.clearInterval(state.consoleRefreshTimer);
+    state.consoleRefreshTimer = null;
+  }
+  if (state.networkRefreshTimer !== null) {
+    window.clearTimeout(state.networkRefreshTimer);
+    state.networkRefreshTimer = null;
+  }
+  state.liveRefreshId += 1;
+}
+
+function scheduleNetworkRefresh() {
+  if (state.networkRefreshTimer !== null) {
+    window.clearTimeout(state.networkRefreshTimer);
+  }
+  state.networkRefreshTimer = window.setTimeout(() => {
+    state.networkRefreshTimer = null;
+    refreshLiveContext('network');
+  }, 250);
+}
+
+function refreshLiveContext(type) {
+  const captureId = state.contextCaptureId;
+  const refreshId = ++state.liveRefreshId;
+  collectContext(type, captureId).then((result) => {
+    if (
+      result === null
+      || refreshId !== state.liveRefreshId
+      || captureId !== state.contextCaptureId
+      || type !== state.selectedContextType
+      || type !== document.getElementById('contextType').value
+    ) {
+      return;
+    }
+    state.selectedContext = result;
+    const dialog = document.getElementById('contextDialog');
+    if (dialog.open) {
+      document.getElementById('contextDialogContent').textContent = result;
+    }
+  }).catch((error) => {
+    if (refreshId === state.liveRefreshId && type === state.selectedContextType) {
+      setContextStatus(`Live update failed: ${error.message}`);
+    }
   });
 }
 
