@@ -1,7 +1,8 @@
 const storageKeys = {
   apiKey: 'devConsoleAiApiKey',
   model: 'devConsoleAiModel',
-  chatHistory: 'devConsoleAiChatHistory'
+  chatHistory: 'devConsoleAiChatHistory',
+  theme: 'devConsoleAiTheme'
 };
 
 const state = {
@@ -10,7 +11,9 @@ const state = {
   selectedContext: null,
   selectedContextType: 'none',
   contextCaptureId: 0,
-  domPicker: null
+  domPicker: null,
+  themePreference: 'dark',
+  themeMediaQuery: null
 };
 
 window.addEventListener('DOMContentLoaded', init);
@@ -19,6 +22,38 @@ window.addEventListener('beforeunload', () => stopDomPicker(false));
 function init() {
   bindUi();
   loadHistory();
+  loadTheme();
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes[storageKeys.theme]) {
+      applyTheme(changes[storageKeys.theme].newValue || 'dark');
+    }
+  });
+  state.themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  state.themeMediaQuery.addEventListener('change', () => {
+    if (state.themePreference === 'system') {
+      applyTheme('system');
+    }
+  });
+}
+
+function loadTheme() {
+  chrome.storage.local.get(storageKeys.theme, (result) => {
+    if (chrome.runtime.lastError) {
+      setContextStatus(`Could not load theme: ${chrome.runtime.lastError.message}`);
+      applyTheme('dark');
+      return;
+    }
+    applyTheme(result[storageKeys.theme] || 'dark');
+  });
+}
+
+function applyTheme(preference) {
+  const validPreference = ['light', 'dark', 'system'].includes(preference) ? preference : 'dark';
+  state.themePreference = validPreference;
+  const isDark = validPreference === 'system'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : validPreference === 'dark';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
 }
 
 function bindUi() {

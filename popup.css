@@ -1,8 +1,29 @@
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
+  --popup-bg: #111827;
+  --popup-text: #e5e7eb;
+  --popup-muted: #94a3b8;
+  --popup-label: #cbd5e1;
+  --popup-input-bg: #0f172a;
+  --popup-input-border: rgba(148, 163, 184, 0.3);
+  --popup-success: #86efac;
+  --popup-error: #fca5a5;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  color: #e5e7eb;
-  background: #111827;
+  color: var(--popup-text);
+  background: var(--popup-bg);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --popup-bg: #f8fafc;
+  --popup-text: #0f172a;
+  --popup-muted: #64748b;
+  --popup-label: #334155;
+  --popup-input-bg: #ffffff;
+  --popup-input-border: rgba(71, 85, 105, 0.35);
+  --popup-success: #15803d;
+  --popup-error: #b91c1c;
 }
 
 * {
@@ -29,7 +50,7 @@ h1 {
 
 header p,
 .note {
-  color: #94a3b8;
+  color: var(--popup-muted);
   font-size: 12px;
 }
 
@@ -44,7 +65,7 @@ form {
 
 label {
   margin-top: 6px;
-  color: #cbd5e1;
+  color: var(--popup-label);
   font-size: 12px;
   font-weight: 600;
 }
@@ -53,9 +74,9 @@ input,
 select {
   width: 100%;
   padding: 9px 10px;
-  color: #e5e7eb;
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: var(--popup-text);
+  background: var(--popup-input-bg);
+  border: 1px solid var(--popup-input-border);
   border-radius: 7px;
   font: inherit;
 }
@@ -84,11 +105,11 @@ button:disabled {
 }
 
 #status.error {
-  color: #fca5a5;
+  color: var(--popup-error);
 }
 
 #status.success {
-  color: #86efac;
+  color: var(--popup-success);
 }
 
 .note {

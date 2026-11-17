@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #111827;
   --panel: #1f2937;
   --panel-alt: #0f172a;
@@ -11,6 +12,54 @@
   --success: #22c55e;
   --danger: #f87171;
   --shadow: rgba(15, 23, 42, 0.5);
+  --primary-text: #082f49;
+  --button-secondary-bg: rgba(56, 189, 248, 0.15);
+  --history-active-bg: rgba(56, 189, 248, 0.12);
+  --history-active-border: rgba(56, 189, 248, 0.7);
+  --control-bg: rgba(15, 23, 42, 0.9);
+  --context-bg: rgba(17, 24, 39, 0.5);
+  --message-bg: rgba(15, 23, 42, 0.55);
+  --user-border: rgba(56, 189, 248, 0.3);
+  --user-bg: rgba(14, 165, 233, 0.06);
+  --assistant-border: rgba(34, 197, 94, 0.3);
+  --assistant-bg: rgba(34, 197, 94, 0.06);
+  --subtle-bg: rgba(148, 163, 184, 0.12);
+  --code-bg: rgba(15, 23, 42, 0.8);
+  --table-actions-bg: rgba(15, 23, 42, 0.75);
+  --table-header-bg: rgba(56, 189, 248, 0.12);
+  --composer-bg: rgba(17, 24, 39, 0.6);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --panel-alt: #f1f5f9;
+  --sidebar: #f1f5f9;
+  --border: rgba(71, 85, 105, 0.24);
+  --text: #0f172a;
+  --muted: #64748b;
+  --primary: #0ea5e9;
+  --primary-strong: #0284c7;
+  --success: #15803d;
+  --danger: #dc2626;
+  --shadow: rgba(15, 23, 42, 0.16);
+  --primary-text: #ffffff;
+  --button-secondary-bg: rgba(14, 165, 233, 0.1);
+  --history-active-bg: rgba(14, 165, 233, 0.1);
+  --history-active-border: rgba(2, 132, 199, 0.55);
+  --control-bg: #ffffff;
+  --context-bg: #f1f5f9;
+  --message-bg: #ffffff;
+  --user-border: rgba(2, 132, 199, 0.3);
+  --user-bg: rgba(14, 165, 233, 0.06);
+  --assistant-border: rgba(21, 128, 61, 0.28);
+  --assistant-bg: rgba(21, 128, 61, 0.05);
+  --subtle-bg: rgba(71, 85, 105, 0.08);
+  --code-bg: #f1f5f9;
+  --table-actions-bg: #f1f5f9;
+  --table-header-bg: rgba(14, 165, 233, 0.1);
+  --composer-bg: #f8fafc;
 }
 
 * {
@@ -40,7 +89,7 @@ button {
   border: none;
   border-radius: 8px;
   background: var(--primary);
-  color: #082f49;
+  color: var(--primary-text);
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.2s ease;
@@ -51,7 +100,7 @@ button:hover {
 }
 
 button.secondary-btn {
-  background: rgba(56, 189, 248, 0.15);
+  background: var(--button-secondary-bg);
   color: var(--text);
   border: 1px solid var(--border);
 }
@@ -123,8 +172,8 @@ button.secondary-btn {
 }
 
 .history-item.active {
-  background: rgba(56, 189, 248, 0.12);
-  border-color: rgba(56, 189, 248, 0.7);
+  background: var(--history-active-bg);
+  border-color: var(--history-active-border);
 }
 
 .history-item small {
@@ -142,7 +191,7 @@ button.secondary-btn {
 
 .context-bar select,
 textarea {
-  background: rgba(15, 23, 42, 0.9);
+  background: var(--control-bg);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
@@ -157,7 +206,7 @@ textarea {
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.5);
+  background: var(--context-bg);
 }
 
 .context-bar label {
@@ -237,18 +286,18 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
-  background: rgba(15, 23, 42, 0.55);
+  background: var(--message-bg);
   box-shadow: 0 6px 18px var(--shadow);
 }
 
 .message.user {
-  border-color: rgba(56, 189, 248, 0.3);
-  background: rgba(14, 165, 233, 0.06);
+  border-color: var(--user-border);
+  background: var(--user-bg);
 }
 
 .message.assistant {
-  border-color: rgba(34, 197, 94, 0.3);
-  background: rgba(34, 197, 94, 0.06);
+  border-color: var(--assistant-border);
+  background: var(--assistant-bg);
 }
 
 .message-header {
@@ -268,7 +317,7 @@ textarea {
 }
 
 .copy-btn {
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--subtle-bg);
   color: var(--text);
   border: 1px solid var(--border);
   padding: 5px 8px;
@@ -298,7 +347,7 @@ textarea {
 }
 
 .message-body code {
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--code-bg);
   border-radius: 6px;
   padding: 0.16rem 0.35rem;
   font-family: "Consolas", "Monaco", monospace;
@@ -306,7 +355,7 @@ textarea {
 }
 
 .message-body pre {
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow-x: auto;
@@ -340,14 +389,14 @@ textarea {
   justify-content: flex-end;
   gap: 8px;
   padding: 8px;
-  background: rgba(15, 23, 42, 0.75);
+  background: var(--table-actions-bg);
   border-bottom: 1px solid var(--border);
 }
 
 .table-export-btn {
   padding: 5px 8px;
   color: var(--text);
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--subtle-bg);
   border: 1px solid var(--border);
   font-size: 0.75rem;
 }
@@ -375,7 +424,7 @@ textarea {
 }
 
 .message-body th {
-  background: rgba(56, 189, 248, 0.12);
+  background: var(--table-header-bg);
   font-weight: 700;
 }
 
@@ -392,7 +441,7 @@ textarea {
   min-width: 0;
   border-top: 1px solid var(--border);
   padding: 12px 16px 16px;
-  background: rgba(17, 24, 39, 0.6);
+  background: var(--composer-bg);
 }
 
 .composer textarea {
