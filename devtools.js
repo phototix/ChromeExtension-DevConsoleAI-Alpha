@@ -74,7 +74,20 @@ function bindUi() {
     }
   });
 
-  document.getElementById('composer').addEventListener('submit', async (event) => {
+  const composer = document.getElementById('composer');
+  const promptInput = document.getElementById('promptInput');
+  promptInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!document.getElementById('sendBtn').disabled) {
+      composer.requestSubmit();
+    }
+  });
+
+  composer.addEventListener('submit', async (event) => {
     event.preventDefault();
     const prompt = document.getElementById('promptInput').value.trim();
     if (!prompt) {
@@ -91,7 +104,8 @@ function bindUi() {
       return;
     }
 
-    session.messages.push({ role: 'user', text: prompt });
+    const userMessage = { role: 'user', text: prompt };
+    session.messages.push(userMessage);
     renderMessages();
     document.getElementById('promptInput').value = '';
 
@@ -118,7 +132,8 @@ function bindUi() {
         contextText = formatContext(state.selectedContextType, context);
       }
 
-      const answer = await askDeepSeek(prompt, contextText);
+      userMessage.contextText = contextText;
+      const answer = await askDeepSeek(session.messages);
       session.messages.push({ role: 'assistant', text: answer });
     } catch (error) {
       session.messages.push({ role: 'assistant', text: `Request failed: ${error.message}` });
@@ -668,7 +683,7 @@ function formatContext(type, content) {
   return `Context type: ${collation[type] || 'Custom'}\n\n${content}`;
 }
 
-async function askDeepSeek(prompt, contextText) {
+async function askDeepSeek(conversation) {
   const settings = await new Promise((resolve, reject) => {
     chrome.storage.local.get([storageKeys.apiKey, storageKeys.model], (result) => {
       if (chrome.runtime.lastError) {
@@ -692,10 +707,17 @@ async function askDeepSeek(prompt, contextText) {
         role: 'system',
         content: 'You are a helpful frontend debugging assistant. Use the provided page context to answer the user accurately and concisely.'
       },
-      {
-        role: 'user',
-        content: contextText ? `${prompt}\n\n--- ATTACHED CONTEXT ---\n${contextText}` : prompt
-      }
+      ...conversation
+        .filter((message) =>
+          (message.role === 'user' || message.role === 'assistant') &&
+          typeof message.text === 'string'
+        )
+        .map((message) => ({
+          role: message.role,
+          content: message.role === 'user' && message.contextText
+            ? `${message.text}\n\n--- ATTACHED CONTEXT ---\n${message.contextText}`
+            : message.text
+        }))
     ],
     temperature: 0.2,
     stream: false

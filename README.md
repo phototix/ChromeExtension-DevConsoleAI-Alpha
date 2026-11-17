@@ -7,6 +7,7 @@ Features:
 - Toolbar popup for configuring the DeepSeek API key and model
 - Captures page console, network, and metadata; interactively select and highlight a DOM element to attach its markup
 - Chat UI with automatic capture when selecting a source; DOM context uses the selected element snapshot, while console, network, and page metadata refresh on send. Inspect attached data in a compact modal.
+- AI requests include the active conversation history, including previously attached context.
 - Markdown rendering with HTML tables and per-table CSV or Excel (.xlsx) export
 - Copy-to-clipboard support for chat responses
 - Conversation history saved locally

@@ -101,7 +101,10 @@ button.secondary-btn {
 
 .history-item {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   flex: 0 0 auto;
+  gap: 4px;
   width: 100%;
   min-width: 0;
   text-align: left;
@@ -113,6 +116,12 @@ button.secondary-btn {
   cursor: pointer;
 }
 
+.history-item > div {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .history-item.active {
   background: rgba(56, 189, 248, 0.12);
   border-color: rgba(56, 189, 248, 0.7);
@@ -120,6 +129,7 @@ button.secondary-btn {
 
 .history-item small {
   color: var(--muted);
+  flex: 0 0 auto;
 }
 
 .chat-panel {
@@ -433,7 +443,8 @@ textarea {
   }
 
   .history-item {
-    width: min(240px, 70vw);
+    flex-basis: 100%;
+    width: 100%;
   }
 }
 
