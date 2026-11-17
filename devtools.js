@@ -56,6 +56,23 @@ function bindUi() {
       event.currentTarget.close();
     }
   });
+  document.getElementById('chatMessages').addEventListener('click', (event) => {
+    const exportButton = event.target.closest('[data-table-export]');
+    if (!exportButton) {
+      return;
+    }
+
+    const table = exportButton.closest('.table-container')?.querySelector('table');
+    if (!table) {
+      return;
+    }
+
+    try {
+      downloadTable(table, exportButton.dataset.tableExport);
+    } catch (error) {
+      setContextStatus(`Table export failed: ${error.message}`);
+    }
+  });
 
   document.getElementById('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -707,54 +724,312 @@ function renderMarkdown(markdown) {
     return '<p class="empty-state">No content.</p>';
   }
 
-  const escaped = escapeHtml(markdown);
-  const codeBlocks = [];
-  const withCodeBlocks = escaped.replace(/```([\s\S]*?)```/g, (_, code) => {
-    const token = `__CODEBLOCK_${codeBlocks.length}__`;
-    codeBlocks.push(`<pre><code>${code.trim()}</code></pre>`);
-    return token;
+  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+  const output = [];
+  let index = 0;
+  let tableCount = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^```/);
+    if (fence) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      output.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      output.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (index + 1 < lines.length && isMarkdownTable(lines[index], lines[index + 1])) {
+      const headers = splitTableRow(lines[index]);
+      const alignments = splitTableRow(lines[index + 1]).map((cell) => {
+        const left = cell.startsWith(':');
+        const right = cell.endsWith(':');
+        return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
+      });
+      index += 2;
+
+      const rows = [];
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+
+      const renderCell = (cell, cellIndex, tag) => {
+        const alignment = alignments[cellIndex];
+        const style = alignment ? ` style="text-align:${alignment}"` : '';
+        return `<${tag}${style}>${formatInline(cell)}</${tag}>`;
+      };
+      const headerHtml = headers.map((cell, cellIndex) => renderCell(cell, cellIndex, 'th')).join('');
+      const rowsHtml = rows.map((row) => {
+        const cells = headers.map((_, cellIndex) => renderCell(row[cellIndex] || '', cellIndex, 'td')).join('');
+        return `<tr>${cells}</tr>`;
+      }).join('');
+      tableCount += 1;
+      output.push(
+        `<div class="table-container"><div class="table-actions">` +
+        `<button class="table-export-btn" type="button" data-table-export="csv">Download CSV</button>` +
+        `<button class="table-export-btn" type="button" data-table-export="xlsx">Download Excel</button>` +
+        `</div><div class="table-scroll"><table data-table-number="${tableCount}"><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></div></div>`
+      );
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ''));
+        index += 1;
+      }
+      output.push(`<blockquote>${quoteLines.map((quoteLine) => `<p>${formatInline(quoteLine)}</p>`).join('')}</blockquote>`);
+      continue;
+    }
+
+    const listMatch = line.match(/^([-*+]|\d+\.)\s+(.+)$/);
+    if (listMatch) {
+      const ordered = /^\d+\./.test(listMatch[1]);
+      const tag = ordered ? 'ol' : 'ul';
+      const items = [];
+      while (index < lines.length) {
+        const itemMatch = lines[index].trim().match(/^([-*+]|\d+\.)\s+(.+)$/);
+        if (!itemMatch || /^\d+\./.test(itemMatch[1]) !== ordered) {
+          break;
+        }
+        items.push(`<li>${formatInline(itemMatch[2])}</li>`);
+        index += 1;
+      }
+      output.push(`<${tag}>${items.join('')}</${tag}>`);
+      continue;
+    }
+
+    const paragraph = [line];
+    index += 1;
+    while (index < lines.length && lines[index].trim() &&
+      !/^(#{1,6})\s|^```|^>\s?/.test(lines[index].trim()) &&
+      !(index + 1 < lines.length && isMarkdownTable(lines[index], lines[index + 1])) &&
+      !/^([-*+]|\d+\.)\s+/.test(lines[index].trim())) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    output.push(`<p>${paragraph.map(formatInline).join('<br>')}</p>`);
+  }
+
+  return output.join('');
+}
+
+function isMarkdownTable(headerLine, dividerLine) {
+  if (!headerLine.includes('|')) {
+    return false;
+  }
+  const headers = splitTableRow(headerLine);
+  const dividers = splitTableRow(dividerLine);
+  return headers.length > 0 && headers.length === dividers.length &&
+    dividers.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function splitTableRow(line) {
+  let value = line.trim();
+  if (value.startsWith('|')) {
+    value = value.slice(1);
+  }
+  if (value.endsWith('|') && !value.endsWith('\\|')) {
+    value = value.slice(0, -1);
+  }
+
+  const cells = [];
+  let cell = '';
+  let escaped = false;
+  for (const character of value) {
+    if (character === '|' && !escaped) {
+      cells.push(cell.trim().replace(/\\\|/g, '|'));
+      cell = '';
+      continue;
+    }
+    cell += character;
+    if (character === '\\' && !escaped) {
+      escaped = true;
+    } else {
+      escaped = false;
+    }
+  }
+  cells.push(cell.trim().replace(/\\\|/g, '|'));
+  return cells;
+}
+
+function downloadTable(table, format) {
+  const rows = Array.from(table.rows, (row) =>
+    Array.from(row.cells, (cell) => cell.innerText.trim())
+  );
+  const fileNumber = table.dataset.tableNumber || '1';
+
+  if (format === 'csv') {
+    const csv = `\uFEFF${rows.map((row) =>
+      row.map((cell) => {
+        const safeCell = /^\s*[=+@]/.test(cell) || /^\s*-(?:\s|[A-Za-z=@])/.test(cell)
+          ? `'${cell}`
+          : cell;
+        return `"${safeCell.replace(/"/g, '""')}"`;
+      }).join(',')
+    ).join('\r\n')}`;
+    downloadBlob(csv, `dev-console-ai-table-${fileNumber}.csv`, 'text/csv;charset=utf-8');
+    return;
+  }
+
+  if (format === 'xlsx') {
+    const workbook = createXlsx(rows);
+    downloadBlob(workbook, `dev-console-ai-table-${fileNumber}.xlsx`,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    return;
+  }
+
+  throw new Error('Unsupported table export format.');
+}
+
+function downloadBlob(content, filename, mimeType) {
+  const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function createXlsx(rows) {
+  const xmlEscape = (value) => String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+  const columnName = (column) => {
+    let name = '';
+    for (let value = column + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+      name = String.fromCharCode(65 + (value - 1) % 26) + name;
+    }
+    return name;
+  };
+  const sheetRows = rows.map((row, rowIndex) => {
+    const cells = row.map((value, columnIndex) =>
+      `<c r="${columnName(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`
+    ).join('');
+    return `<row r="${rowIndex + 1}">${cells}</row>`;
+  }).join('');
+
+  return createStoredZip([
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '</Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      '</Relationships>'],
+    ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<sheets><sheet name="AI Table" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+      '</Relationships>'],
+    ['xl/worksheets/sheet1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      `<sheetData>${sheetRows}</sheetData></worksheet>`]
+  ]);
+}
+
+function createStoredZip(files) {
+  const encoder = new TextEncoder();
+  const entries = files.map(([name, content]) => {
+    const filename = encoder.encode(name);
+    const data = encoder.encode(content);
+    return { filename, data, crc: crc32(data) };
+  });
+  const localParts = [];
+  const centralParts = [];
+  let localOffset = 0;
+
+  entries.forEach((entry) => {
+    const localHeader = new Uint8Array(30 + entry.filename.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint32(14, entry.crc, true);
+    localView.setUint32(18, entry.data.length, true);
+    localView.setUint32(22, entry.data.length, true);
+    localView.setUint16(26, entry.filename.length, true);
+    localHeader.set(entry.filename, 30);
+    localParts.push(localHeader, entry.data);
+
+    const centralHeader = new Uint8Array(46 + entry.filename.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint32(16, entry.crc, true);
+    centralView.setUint32(20, entry.data.length, true);
+    centralView.setUint32(24, entry.data.length, true);
+    centralView.setUint16(28, entry.filename.length, true);
+    centralView.setUint32(42, localOffset, true);
+    centralHeader.set(entry.filename, 46);
+    centralParts.push(centralHeader);
+    localOffset += localHeader.length + entry.data.length;
   });
 
-  const paragraphs = withCodeBlocks
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => {
-      if (block.startsWith('__CODEBLOCK_')) {
-        const index = Number(block.replace(/[^\d]/g, ''));
-        return codeBlocks[index] || '';
-      }
+  const centralDirectory = concatenateBytes(centralParts);
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralDirectory.length, true);
+  endView.setUint32(16, localOffset, true);
+  return new Blob([...localParts, centralDirectory, endRecord], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
 
-      const lines = block.split(/\n/);
-      const items = [];
-      const isList = lines.every((line) => /^[-*] /.test(line) || /^\d+\. /.test(line));
+function concatenateBytes(parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+  return output;
+}
 
-      if (isList) {
-        const listType = lines[0].match(/^\d+\./) ? 'ol' : 'ul';
-        const htmlItems = lines
-          .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, ''))
-          .map((item) => `<li>${formatInline(item)}</li>`)
-          .join('');
-        return `<${listType}>${htmlItems}</${listType}>`;
-      }
-
-      if (block.startsWith('#')) {
-        const level = block.match(/^#+/)?.[0].length || 1;
-        const content = formatInline(block.replace(/^#+\s*/, ''));
-        return `<h${level}>${content}</h${level}>`;
-      }
-
-      const paragraphs = block
-        .split(/\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => `<p>${formatInline(line)}</p>`)
-        .join('');
-      return paragraphs;
-    })
-    .join('');
-
-  return paragraphs;
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  bytes.forEach((byte) => {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+  });
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function formatInline(text) {
