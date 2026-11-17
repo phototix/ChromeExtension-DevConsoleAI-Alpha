@@ -148,13 +148,23 @@ button.secondary-btn {
   gap: 8px;
 }
 
+.history-item-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+  gap: 4px;
+}
+
 .history-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   gap: 4px;
-  width: 100%;
+  width: auto;
   min-width: 0;
   text-align: left;
   background: transparent;
@@ -179,6 +189,63 @@ button.secondary-btn {
 .history-item small {
   color: var(--muted);
   flex: 0 0 auto;
+}
+
+.history-menu {
+  position: relative;
+  flex: 0 0 34px;
+}
+
+.history-menu-trigger {
+  display: grid;
+  width: 34px;
+  height: 100%;
+  min-height: 38px;
+  place-items: center;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.history-menu-trigger[aria-expanded="true"],
+.history-menu-trigger:hover {
+  background: var(--button-secondary-bg);
+}
+
+.history-menu-content {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px var(--shadow);
+}
+
+.history-menu-action {
+  width: 100%;
+  padding: 7px 10px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+}
+
+.history-menu-action:hover {
+  background: var(--button-secondary-bg);
+}
+
+.history-menu-action.delete-action {
+  color: var(--danger);
+}
+
+.history-menu-action.delete-action:hover {
+  background: var(--subtle-bg);
 }
 
 .chat-panel {
@@ -267,6 +334,99 @@ textarea {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 0.82rem/1.5 "Consolas", "Monaco", monospace;
+}
+
+.rename-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.rename-form .dialog-header {
+  margin: 0 -16px;
+}
+
+.rename-form label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rename-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--text);
+  background: var(--control-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rename-actions button {
+  padding: 7px 12px;
+}
+
+.delete-dialog {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.delete-confirmation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 24px 20px;
+  text-align: center;
+}
+
+.delete-confirm-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  color: var(--danger);
+  border: 2px solid var(--danger);
+  border-radius: 50%;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+.delete-confirmation h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.delete-confirmation p {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.delete-confirm-actions button {
+  min-width: 88px;
+  padding: 8px 12px;
+}
+
+.delete-confirm-btn {
+  background: var(--danger);
+  color: #ffffff;
 }
 
 .messages {
@@ -478,21 +638,27 @@ textarea {
   }
 
   .history-panel {
-    flex: 0 0 132px;
+    flex: 0 0 auto;
     width: 100%;
     min-height: 0;
+    max-height: min(35vh, 240px);
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
 
   .history-list {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
   .history-item {
-    flex-basis: 100%;
+    flex-basis: auto;
+  }
+
+  .history-item-row {
+    flex: 0 0 auto;
     width: 100%;
   }
 }

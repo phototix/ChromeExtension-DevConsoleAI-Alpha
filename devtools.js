@@ -16,8 +16,52 @@ const state = {
   themeMediaQuery: null,
   consoleRefreshTimer: null,
   networkRefreshTimer: null,
-  liveRefreshId: 0
+  liveRefreshId: 0,
+  renameSessionId: null,
+  deleteSessionId: null
 };
+
+function serializeDomElement(element) {
+  const selectorParts = [];
+  const breadcrumbs = [];
+  let current = element;
+  while (current && current.nodeType === 1 && selectorParts.length < 24) {
+    let part = current.tagName.toLowerCase();
+    if (current.id) {
+      part += `#${CSS.escape(current.id)}`;
+    }
+    part += Array.from(current.classList)
+      .slice(0, 3)
+      .map((className) => `.${CSS.escape(className)}`)
+      .join('');
+    const siblings = current.parentElement
+      ? Array.from(current.parentElement.children).filter((sibling) => sibling.tagName === current.tagName)
+      : [];
+    if (siblings.length > 1) {
+      part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+    }
+    selectorParts.unshift(part);
+    breadcrumbs.unshift(
+      current.tagName.toLowerCase() +
+      (current.id ? `#${current.id}` : '') +
+      (current.classList.length ? `.${Array.from(current.classList).slice(0, 3).join('.')}` : '')
+    );
+    current = current.parentElement;
+  }
+
+  const html = element.outerHTML || '';
+  return {
+    selector: selectorParts.join(' > '),
+    breadcrumbs: breadcrumbs.join(' > '),
+    root: element.getRootNode() instanceof ShadowRoot ? 'shadow DOM' : 'document',
+    tagName: element.tagName.toLowerCase(),
+    id: element.id || null,
+    classes: Array.from(element.classList),
+    text: (element.innerText || element.textContent || '').trim().slice(0, 1000),
+    outerHTML: html.slice(0, 30000),
+    truncated: html.length > 30000
+  };
+}
 
 const consoleCaptureExpression = `(() => {
   if (!window.__devConsoleAiInjected) {
@@ -142,12 +186,17 @@ function bindUi() {
     }
     if (state.selectedContextType === 'none') {
       setContextStatus('');
+      updateContextActions();
       return;
     }
 
     captureContext(state.selectedContextType);
   });
   document.getElementById('viewContextBtn').addEventListener('click', showContextDialog);
+  document.getElementById('clearContextBtn').addEventListener('click', clearAttachedContext);
+  document.getElementById('regrabDomBtn').addEventListener('click', () => {
+    captureContext('dom', { preserveExisting: true });
+  });
   document.getElementById('cancelDomPickBtn').addEventListener('click', () => stopDomPicker(true));
   document.getElementById('closeContextDialogBtn').addEventListener('click', () => {
     document.getElementById('contextDialog').close();
@@ -156,6 +205,30 @@ function bindUi() {
     if (event.target === event.currentTarget) {
       event.currentTarget.close();
     }
+  });
+  document.getElementById('renameForm').addEventListener('submit', saveRenamedSession);
+  document.getElementById('cancelRenameBtn').addEventListener('click', () => {
+    document.getElementById('renameDialog').close();
+  });
+  document.getElementById('renameDialog').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) {
+      event.currentTarget.close();
+    }
+  });
+  document.getElementById('renameDialog').addEventListener('close', () => {
+    state.renameSessionId = null;
+  });
+  document.getElementById('cancelDeleteBtn').addEventListener('click', () => {
+    document.getElementById('deleteDialog').close();
+  });
+  document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDeleteSession);
+  document.getElementById('deleteDialog').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) {
+      event.currentTarget.close();
+    }
+  });
+  document.getElementById('deleteDialog').addEventListener('close', () => {
+    state.deleteSessionId = null;
   });
   document.getElementById('chatMessages').addEventListener('click', (event) => {
     const exportButton = event.target.closest('[data-table-export]');
@@ -205,9 +278,15 @@ function bindUi() {
       return;
     }
 
+    const shouldGenerateTitle = session.messages.length === 0 && session.titleSource !== 'manual';
     const userMessage = { role: 'user', text: prompt };
     session.messages.push(userMessage);
+    if (shouldGenerateTitle) {
+      session.title = createPromptTitle(prompt);
+      session.titleSource = 'prompt';
+    }
     renderMessages();
+    renderHistory();
     document.getElementById('promptInput').value = '';
 
     const sendButton = document.getElementById('sendBtn');
@@ -236,6 +315,9 @@ function bindUi() {
       userMessage.contextText = contextText;
       const answer = await askDeepSeek(session.messages);
       session.messages.push({ role: 'assistant', text: answer });
+      if (shouldGenerateTitle && !answer.startsWith('Missing DeepSeek API key.')) {
+        generateSessionTitle(session, prompt);
+      }
     } catch (error) {
       session.messages.push({ role: 'assistant', text: `Request failed: ${error.message}` });
     } finally {
@@ -252,6 +334,7 @@ function createSession() {
   const session = {
     id: `chat-${Date.now()}`,
     title: 'New chat',
+    titleSource: 'prompt',
     messages: []
   };
   state.history.unshift(session);
@@ -280,11 +363,6 @@ function loadHistory() {
 }
 
 function saveHistory() {
-  const activeSession = state.history.find((item) => item.id === state.activeSessionId);
-  if (activeSession && activeSession.messages.length > 0) {
-    activeSession.title = activeSession.messages[0].text.slice(0, 28) || 'New chat';
-  }
-
   chrome.storage.local.set({
     [storageKeys.chatHistory]: state.history
   });
@@ -292,9 +370,13 @@ function saveHistory() {
 
 function renderHistory() {
   const historyList = document.getElementById('historyList');
+  document.querySelectorAll('.history-menu-content').forEach((menu) => menu.remove());
   historyList.innerHTML = '';
 
   state.history.forEach((session) => {
+    const row = document.createElement('div');
+    row.className = 'history-item-row';
+
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'history-item';
@@ -315,8 +397,147 @@ function renderHistory() {
       renderMessages();
     });
 
-    historyList.appendChild(button);
+    const menu = document.createElement('div');
+    menu.className = 'history-menu';
+    const menuTrigger = document.createElement('button');
+    menuTrigger.type = 'button';
+    menuTrigger.className = 'history-menu-trigger';
+    menuTrigger.textContent = '⋯';
+    menuTrigger.setAttribute('aria-label', `Actions for ${session.title || 'New chat'}`);
+    menuTrigger.setAttribute('aria-haspopup', 'menu');
+    menuTrigger.setAttribute('aria-expanded', 'false');
+    const menuContent = document.createElement('div');
+    menuContent.className = 'history-menu-content';
+    menuContent.setAttribute('popover', 'auto');
+    menuContent.setAttribute('role', 'menu');
+    menuTrigger.addEventListener('click', () => {
+      if (menuContent.matches(':popover-open')) {
+        menuContent.hidePopover();
+        return;
+      }
+
+      menuContent.showPopover();
+      const triggerRect = menuTrigger.getBoundingClientRect();
+      const popoverRect = menuContent.getBoundingClientRect();
+      const left = Math.max(8, Math.min(triggerRect.right - popoverRect.width, window.innerWidth - popoverRect.width - 8));
+      const belowTop = triggerRect.bottom + 4;
+      const top = belowTop + popoverRect.height <= window.innerHeight - 8
+        ? belowTop
+        : Math.max(8, triggerRect.top - popoverRect.height - 4);
+      menuContent.style.left = `${left}px`;
+      menuContent.style.top = `${top}px`;
+    });
+    menuContent.addEventListener('toggle', (event) => {
+      menuTrigger.setAttribute('aria-expanded', event.newState === 'open' ? 'true' : 'false');
+    });
+    const renameButton = document.createElement('button');
+    renameButton.type = 'button';
+    renameButton.className = 'history-menu-action';
+    renameButton.setAttribute('role', 'menuitem');
+    renameButton.textContent = 'Rename';
+    renameButton.addEventListener('click', () => {
+      menuContent.hidePopover();
+      openRenameDialog(session);
+    });
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'history-menu-action delete-action';
+    deleteButton.setAttribute('role', 'menuitem');
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => {
+      menuContent.hidePopover();
+      openDeleteDialog(session);
+    });
+
+    menuContent.append(renameButton, deleteButton);
+    menu.append(menuTrigger);
+    document.body.appendChild(menuContent);
+    row.append(button, menu);
+    historyList.appendChild(row);
   });
+}
+
+function deleteSession(session) {
+  const sessionIndex = state.history.findIndex((item) => item.id === session.id);
+  if (sessionIndex < 0) {
+    return;
+  }
+
+  const deletesActiveSession = session.id === state.activeSessionId;
+  state.history.splice(sessionIndex, 1);
+  let replacementCreated = false;
+  if (deletesActiveSession) {
+    if (state.history.length > 0) {
+      state.activeSessionId = state.history[0].id;
+    } else {
+      createSession();
+      replacementCreated = true;
+    }
+  }
+
+  if (!replacementCreated) {
+    saveHistory();
+  }
+  renderHistory();
+  if (deletesActiveSession) {
+    renderMessages();
+  }
+}
+
+function openDeleteDialog(session) {
+  state.deleteSessionId = session.id;
+  document.getElementById('deleteDialogMessage').textContent =
+    `Delete "${session.title || 'New chat'}"? This action cannot be undone.`;
+  document.getElementById('deleteDialog').showModal();
+  document.getElementById('cancelDeleteBtn').focus();
+}
+
+function confirmDeleteSession() {
+  const session = state.history.find((item) => item.id === state.deleteSessionId);
+  if (!session) {
+    setContextStatus('Could not delete conversation because it is no longer available.');
+    document.getElementById('deleteDialog').close();
+    return;
+  }
+
+  state.deleteSessionId = null;
+  document.getElementById('deleteDialog').close();
+  deleteSession(session);
+}
+
+function openRenameDialog(session) {
+  state.renameSessionId = session.id;
+  const input = document.getElementById('renameTitleInput');
+  input.value = session.title || '';
+  input.setCustomValidity('');
+  document.getElementById('renameDialog').showModal();
+  input.focus();
+  input.select();
+}
+
+function saveRenamedSession(event) {
+  event.preventDefault();
+  const session = state.history.find((item) => item.id === state.renameSessionId);
+  if (!session) {
+    setContextStatus('Could not rename conversation because it is no longer available.');
+    return;
+  }
+
+  const input = document.getElementById('renameTitleInput');
+  const title = normalizeConversationTitle(input.value);
+  if (!title) {
+    input.setCustomValidity('Enter a conversation title.');
+    input.reportValidity();
+    return;
+  }
+
+  session.title = title;
+  session.titleSource = 'manual';
+  delete session.titleGenerationError;
+  state.renameSessionId = null;
+  document.getElementById('renameDialog').close();
+  saveHistory();
+  renderHistory();
 }
 
 function renderMessages() {
@@ -381,12 +602,13 @@ function showContextDialog() {
   document.getElementById('contextDialog').showModal();
 }
 
-async function captureContext(type = document.getElementById('contextType').value) {
+async function captureContext(type = document.getElementById('contextType').value, options = {}) {
   const contextTypeSelect = document.getElementById('contextType');
   if (type !== contextTypeSelect.value) {
     return null;
   }
 
+  const preserveExisting = options.preserveExisting && state.selectedContext !== null;
   stopLiveContextRefresh();
   const captureId = ++state.contextCaptureId;
   try {
@@ -394,15 +616,19 @@ async function captureContext(type = document.getElementById('contextType').valu
       state.selectedContext = null;
       document.getElementById('viewContextBtn').disabled = true;
       setContextStatus('');
+      updateContextActions();
       return null;
     }
 
-    state.selectedContext = null;
-    document.getElementById('viewContextBtn').disabled = true;
+    if (!preserveExisting) {
+      state.selectedContext = null;
+      document.getElementById('viewContextBtn').disabled = true;
+      updateContextActions();
+    }
     if (type === 'dom') {
       document.getElementById('cancelDomPickBtn').hidden = false;
       document.getElementById('sendBtn').disabled = true;
-      setContextStatus('Hover over the page, then click an element. Press Esc to cancel.');
+      setContextStatus('Hover and click an element, or select a node in Elements and return here.');
     } else {
       setContextStatus('Capturing…');
     }
@@ -415,7 +641,8 @@ async function captureContext(type = document.getElementById('contextType').valu
     if (result === null) {
       document.getElementById('cancelDomPickBtn').hidden = true;
       document.getElementById('sendBtn').disabled = false;
-      setContextStatus('Selection cancelled');
+      setContextStatus(preserveExisting ? 'Selection cancelled; previous DOM data kept' : 'Selection cancelled');
+      updateContextActions();
       return null;
     }
 
@@ -425,20 +652,105 @@ async function captureContext(type = document.getElementById('contextType').valu
     document.getElementById('cancelDomPickBtn').hidden = true;
     document.getElementById('sendBtn').disabled = false;
     setContextStatus('Attached');
+    updateContextActions();
     startLiveContextRefresh(type);
     return result;
   } catch (error) {
     if (captureId === state.contextCaptureId && type === contextTypeSelect.value) {
-      state.selectedContext = null;
-      document.getElementById('viewContextBtn').disabled = true;
+      if (!preserveExisting) {
+        state.selectedContext = null;
+        document.getElementById('viewContextBtn').disabled = true;
+      }
       document.getElementById('cancelDomPickBtn').hidden = true;
       document.getElementById('sendBtn').disabled = false;
-      setContextStatus('Capture failed');
+      setContextStatus(preserveExisting ? 'Selection failed; previous DOM data kept' : 'Capture failed');
       document.getElementById('contextStatus').title = error.message;
+      updateContextActions();
     }
     return null;
   }
 }
+
+function updateContextActions() {
+  const hasContext = state.selectedContext !== null;
+  document.getElementById('viewContextBtn').disabled = !hasContext;
+  document.getElementById('clearContextBtn').hidden = !hasContext;
+  document.getElementById('regrabDomBtn').hidden = !hasContext || state.selectedContextType !== 'dom';
+}
+
+function clearAttachedContext() {
+  state.contextCaptureId += 1;
+  stopDomPicker(false);
+  stopLiveContextRefresh();
+  state.selectedContext = null;
+  state.selectedContextType = 'none';
+  document.getElementById('contextType').value = 'none';
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('cancelDomPickBtn').hidden = true;
+  const contextDialog = document.getElementById('contextDialog');
+  if (contextDialog.open) {
+    contextDialog.close();
+  }
+  updateContextActions();
+  setContextStatus('');
+}
+
+function captureElementsPanelSelection(fromElementsPanel = false) {
+  const contextTypeSelect = document.getElementById('contextType');
+  if (!fromElementsPanel && contextTypeSelect.value !== 'dom') {
+    return;
+  }
+
+  if (fromElementsPanel) {
+    if (state.selectedContextType !== 'dom') {
+      state.selectedContext = null;
+      document.getElementById('viewContextBtn').disabled = true;
+    }
+    contextTypeSelect.value = 'dom';
+    state.selectedContextType = 'dom';
+    updateContextActions();
+  }
+
+  const captureId = ++state.contextCaptureId;
+  stopDomPicker(false);
+  stopLiveContextRefresh();
+  document.getElementById('cancelDomPickBtn').hidden = true;
+  document.getElementById('sendBtn').disabled = true;
+  setContextStatus('Reading selected node from the Elements panel…');
+
+  const expression = `(() => {
+    const selected = typeof $0 === 'undefined' ? null : $0;
+    const element = selected instanceof Element ? selected : selected && selected.parentElement;
+    if (!element) return null;
+    const serialize = ${serializeDomElement.toString()};
+    return JSON.stringify(serialize(element));
+  })()`;
+  chrome.devtools.inspectedWindow.eval(expression, (result, exceptionInfo) => {
+    if (captureId !== state.contextCaptureId || document.getElementById('contextType').value !== 'dom') {
+      return;
+    }
+
+    document.getElementById('sendBtn').disabled = false;
+    if (exceptionInfo) {
+      setContextStatus('Could not read the Elements panel selection');
+      document.getElementById('contextStatus').title =
+        exceptionInfo.description || 'Elements panel selection failed';
+      return;
+    }
+    if (typeof result !== 'string') {
+      setContextStatus('Select an element in Chrome’s Elements panel first, then return here.');
+      return;
+    }
+
+    state.selectedContext = result;
+    state.selectedContextType = 'dom';
+    document.getElementById('viewContextBtn').disabled = false;
+    setContextStatus('Attached from Elements panel');
+    updateContextActions();
+  });
+}
+
+window.captureElementsPanelSelection = captureElementsPanelSelection;
 
 function contextLabel(type) {
   return {
@@ -644,9 +956,14 @@ function startDomPicker(captureId) {
       document.documentElement.appendChild(overlay);
 
       const getElement = (event) => {
-        const target = event.target;
-        if (target === overlay || overlay.contains(target)) return null;
-        return target instanceof Element ? target : target && target.parentElement;
+        const path = typeof event.composedPath === 'function'
+          ? event.composedPath()
+          : [event.target];
+        return path.find((node) =>
+          node instanceof Element &&
+          node !== overlay &&
+          !overlay.contains(node)
+        ) || null;
       };
       const describe = (element) => {
         const rect = element.getBoundingClientRect();
@@ -668,28 +985,8 @@ function startDomPicker(captureId) {
         if (!element) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        const parts = [];
-        let current = element;
-        while (current && current.nodeType === 1 && parts.length < 20) {
-          let part = current.tagName.toLowerCase();
-          const siblings = current.parentElement
-            ? Array.from(current.parentElement.children).filter((sibling) => sibling.tagName === current.tagName)
-            : [];
-          if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
-          parts.unshift(part);
-          current = current.parentElement;
-        }
-        const html = element.outerHTML;
-        const maxHtmlLength = 30000;
-        picker.result = JSON.stringify({
-          selector: parts.join(' > '),
-          tagName: element.tagName.toLowerCase(),
-          id: element.id || null,
-          classes: Array.from(element.classList),
-          text: (element.innerText || element.textContent || '').trim().slice(0, 1000),
-          outerHTML: html.slice(0, maxHtmlLength),
-          truncated: html.length > maxHtmlLength
-        });
+        const serialize = ${serializeDomElement.toString()};
+        picker.result = JSON.stringify(serialize(element));
         picker.cleanup();
       };
       const onKeyDown = (event) => {
@@ -830,7 +1127,36 @@ function formatContext(type, content) {
 }
 
 async function askDeepSeek(conversation) {
-  const settings = await new Promise((resolve, reject) => {
+  const settings = await loadApiSettings();
+  const apiKey = settings[storageKeys.apiKey] || '';
+
+  if (!apiKey) {
+    return 'Missing DeepSeek API key. Click the extension icon in the Chrome toolbar to configure it.';
+  }
+
+  const messages = [
+    {
+      role: 'system',
+      content: 'You are a helpful frontend debugging assistant. Use the provided page context to answer the user accurately and concisely.'
+    },
+    ...conversation
+      .filter((message) =>
+        (message.role === 'user' || message.role === 'assistant') &&
+        typeof message.text === 'string'
+      )
+      .map((message) => ({
+        role: message.role,
+        content: message.role === 'user' && message.contextText
+          ? `${message.text}\n\n--- ATTACHED CONTEXT ---\n${message.contextText}`
+          : message.text
+      }))
+  ];
+
+  return requestDeepSeek(settings, messages, 0.2);
+}
+
+async function loadApiSettings() {
+  return new Promise((resolve, reject) => {
     chrome.storage.local.get([storageKeys.apiKey, storageKeys.model], (result) => {
       if (chrome.runtime.lastError) {
         reject(new Error(`Could not load API settings: ${chrome.runtime.lastError.message}`));
@@ -839,43 +1165,21 @@ async function askDeepSeek(conversation) {
       resolve(result);
     });
   });
-  const apiKey = settings[storageKeys.apiKey] || '';
-  const model = settings[storageKeys.model] || 'deepseek-chat';
+}
 
-  if (!apiKey) {
-    return 'Missing DeepSeek API key. Click the extension icon in the Chrome toolbar to configure it.';
-  }
-
-  const body = {
-    model,
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a helpful frontend debugging assistant. Use the provided page context to answer the user accurately and concisely.'
-      },
-      ...conversation
-        .filter((message) =>
-          (message.role === 'user' || message.role === 'assistant') &&
-          typeof message.text === 'string'
-        )
-        .map((message) => ({
-          role: message.role,
-          content: message.role === 'user' && message.contextText
-            ? `${message.text}\n\n--- ATTACHED CONTEXT ---\n${message.contextText}`
-            : message.text
-        }))
-    ],
-    temperature: 0.2,
-    stream: false
-  };
-
+async function requestDeepSeek(settings, messages, temperature) {
   const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${settings[storageKeys.apiKey]}`
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      model: settings[storageKeys.model] || 'deepseek-chat',
+      messages,
+      temperature,
+      stream: false
+    })
   });
 
   if (!response.ok) {
@@ -885,6 +1189,64 @@ async function askDeepSeek(conversation) {
 
   const data = await response.json();
   return data?.choices?.[0]?.message?.content || 'No response returned by DeepSeek.';
+}
+
+function createPromptTitle(prompt) {
+  return normalizeConversationTitle(prompt).slice(0, 180) || 'New chat';
+}
+
+function normalizeConversationTitle(value) {
+  return String(value || '')
+    .trim()
+    .split(/\r?\n/, 1)[0]
+    .replace(/^title:\s*/i, '')
+    .replace(/^[`"'“”]+|[`"'“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+}
+
+function generateSessionTitle(session, prompt) {
+  const titleMessages = [
+    {
+      role: 'system',
+      content: 'Create a concise, descriptive title for a debugging chat based only on the user message. Use at most 180 characters. Return only the title, with no quotes or explanation.'
+    },
+    { role: 'user', content: prompt }
+  ];
+
+  loadApiSettings()
+    .then((settings) => {
+      if (!settings[storageKeys.apiKey]) {
+        throw new Error('DeepSeek API key is not configured.');
+      }
+      return requestDeepSeek(settings, titleMessages, 0.2);
+    })
+    .then((response) => {
+      const title = normalizeConversationTitle(response);
+      if (!title || title === 'No response returned by DeepSeek.') {
+        throw new Error('DeepSeek did not return a usable title.');
+      }
+      if (session.titleSource === 'manual') {
+        return;
+      }
+
+      session.title = title;
+      session.titleSource = 'generated';
+      delete session.titleGenerationError;
+      saveHistory();
+      renderHistory();
+    })
+    .catch((error) => {
+      if (session.titleSource === 'manual') {
+        return;
+      }
+      session.titleGenerationError = error.message;
+      saveHistory();
+      renderHistory();
+      setContextStatus('Could not generate a chat title; keeping a shortened version of your first message.');
+      document.getElementById('contextStatus').title = error.message;
+    });
 }
 
 function renderMarkdown(markdown) {
